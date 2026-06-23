@@ -3,7 +3,7 @@ module github.com/futureq-io/sdk/go
 go 1.26.2
 
 require (
-	github.com/futureq-io/protocol/proto/go v0.0.0
+	github.com/futureq-io/protocol/proto/go v0.0.1
 	google.golang.org/grpc v1.81.1
 )
 
