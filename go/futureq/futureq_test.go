@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	pb "github.com/futureq-io/protocol/proto/go"
 )
 
 func TestMessageToProtoRoundTrip(t *testing.T) {
@@ -43,11 +45,18 @@ func TestMessageToProtoRoundTrip(t *testing.T) {
 }
 
 func TestAckLevelToProto(t *testing.T) {
-	if toProtoAckLevel(AckQuorum) != 0 {
-		t.Errorf("AckQuorum should map to 0")
+	cases := []struct {
+		sdk   AckLevel
+		proto pb.AckLevel
+	}{
+		{AckQuorum, pb.AckLevel_ACK_LEVEL_QUORUM},
+		{AckLeader, pb.AckLevel_ACK_LEVEL_LEADER},
+		{AckNone, pb.AckLevel_ACK_LEVEL_NO_ACK},
 	}
-	if toProtoAckLevel(AckNone) != 1 {
-		t.Errorf("AckNone should map to 1")
+	for _, tc := range cases {
+		if got := toProtoAckLevel(tc.sdk); got != tc.proto {
+			t.Errorf("toProtoAckLevel(%v) = %v; want %v", tc.sdk, got, tc.proto)
+		}
 	}
 }
 
