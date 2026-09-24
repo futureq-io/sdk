@@ -13,6 +13,12 @@ const (
 	// safest option.
 	AckQuorum AckLevel = iota
 
+	// AckLeader asks the broker to acknowledge the batch as soon as the
+	// Raft leader has durably written it to its own log, without waiting
+	// for replication to a quorum. A leader failover after the ack may
+	// still lose the batch. Stronger than AckNone, weaker than AckQuorum.
+	AckLeader
+
 	// AckNone asks the broker to acknowledge the batch immediately, without
 	// waiting for replication. Use this only when losing messages is
 	// acceptable (e.g. high-throughput telemetry).

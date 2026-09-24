@@ -220,10 +220,14 @@ func (p *Producer) Close() error {
 
 // toProtoAckLevel converts the SDK enum to the wire enum.
 func toProtoAckLevel(a AckLevel) pb.AckLevel {
-	if a == AckNone {
+	switch a {
+	case AckLeader:
+		return pb.AckLevel_ACK_LEVEL_LEADER
+	case AckNone:
 		return pb.AckLevel_ACK_LEVEL_NO_ACK
+	default:
+		return pb.AckLevel_ACK_LEVEL_QUORUM
 	}
-	return pb.AckLevel_ACK_LEVEL_QUORUM
 }
 
 // toProtoMessage converts an SDK [Message] into the wire [pb.PublishMessage].

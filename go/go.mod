@@ -1,10 +1,10 @@
 module github.com/futureq-io/sdk/go
 
-go 1.26.2
+go 1.26.5
 
 require (
 	github.com/futureq-io/futureq v0.0.0
-	github.com/futureq-io/protocol/proto/go v0.1.9
+	github.com/futureq-io/protocol/proto/go v0.2.0
 	github.com/lni/dragonboat/v4 v4.0.0-20250723143628-076c7f6497dc
 	google.golang.org/grpc v1.82.1
 )
