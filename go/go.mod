@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/futureq-io/futureq v0.0.0
-	github.com/futureq-io/protocol/proto/go v0.1.9 // MUST USE THIS
+	github.com/futureq-io/protocol/proto/go v0.1.9
 	github.com/lni/dragonboat/v4 v4.0.0-20250723143628-076c7f6497dc
 	google.golang.org/grpc v1.82.1
 )
@@ -56,5 +56,3 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260729162451-8efbd57d26e0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
-
-replace github.com/futureq-io/futureq => ../../futureq-v2
