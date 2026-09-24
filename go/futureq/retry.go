@@ -10,32 +10,32 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// RetryPolicy configures automatic retry behaviour for [Producer.PublishWithRetry].
+// RetryPolicy configures automatic retry behaviour for
+// [Producer.PublishBatchWithRetry].
 //
-// Zero values are not meaningful; use [DefaultRetryPolicy] as a baseline and
-// adjust individual fields as needed.
+// Zero values are not meaningful; use [DefaultRetryPolicy] as a baseline
+// and adjust individual fields as needed.
 type RetryPolicy struct {
-	// MaxAttempts is the maximum number of times to attempt publishing a
-	// message, including the initial attempt.  A value of 1 means no retries.
+	// MaxAttempts is the maximum number of publish attempts, including the
+	// initial one. A value of 1 means no retries.
 	MaxAttempts int
 
 	// InitialBackoff is the duration to wait before the first retry.
 	InitialBackoff time.Duration
 
-	// MaxBackoff caps the exponential back-off.  Jitter is applied on top.
+	// MaxBackoff caps the exponential back-off. Jitter is applied on top.
 	MaxBackoff time.Duration
 
 	// Multiplier is the factor by which the backoff grows on each attempt.
-	// A value of 2.0 doubles the delay each time.
 	Multiplier float64
 
-	// RetryableFunc is an optional predicate that determines whether a given
-	// error should trigger a retry.  If nil, [DefaultRetryable] is used.
+	// RetryableFunc is an optional predicate that determines whether a
+	// given error should trigger a retry. If nil, [DefaultRetryable] is used.
 	RetryableFunc func(err error) bool
 }
 
-// DefaultRetryPolicy returns a RetryPolicy suitable for most production use
-// cases: three attempts with exponential backoff starting at 100 ms.
+// DefaultRetryPolicy returns a RetryPolicy suitable for most production
+// use cases: three attempts with exponential backoff starting at 100 ms.
 func DefaultRetryPolicy() RetryPolicy {
 	return RetryPolicy{
 		MaxAttempts:    3,
@@ -45,18 +45,26 @@ func DefaultRetryPolicy() RetryPolicy {
 	}
 }
 
-// DefaultRetryable is the default predicate used by [PublishWithRetry].
-// It returns true for transient errors (network timeouts, Unavailable) and
-// false for permanent errors like [ErrNotLeader] or [ErrPublishFailed].
+// DefaultRetryable is the default predicate used by
+// [Producer.PublishBatchWithRetry].
+//
+// It retries transient errors (network timeouts, leader changes,
+// Unavailable) but never permanent application errors like
+// [ErrPublishFailed].
 func DefaultRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
-	// Never retry permanent application errors.
-	if errors.Is(err, ErrNotLeader) || errors.Is(err, ErrPublishFailed) || errors.Is(err, ErrClosed) {
+	// Leader / discovery errors are always worth retrying — the SDK
+	// reconnects under the hood and the next attempt usually lands on the
+	// new leader.
+	if errors.Is(err, ErrNoLeader) || errors.Is(err, ErrNotLeader) || errors.Is(err, ErrStreamClosed) {
+		return true
+	}
+	// Never retry permanent errors.
+	if errors.Is(err, ErrPublishFailed) || errors.Is(err, ErrClosed) {
 		return false
 	}
-	// Retry on gRPC transient status codes.
 	st, ok := status.FromError(err)
 	if ok {
 		switch st.Code() {
@@ -67,20 +75,22 @@ func DefaultRetryable(err error) bool {
 	return false
 }
 
-// PublishWithRetry attempts to publish msg up to policy.MaxAttempts times,
-// pausing between attempts according to the exponential back-off defined in
-// policy.
+// PublishBatchWithRetry attempts to publish msgs up to
+// policy.MaxAttempts times, pausing between attempts according to the
+// exponential back-off defined in policy.
 //
-// It is the caller's responsibility to ensure that the context has a deadline
+// It is the caller's responsibility to ensure the context has a deadline
 // encompassing all attempts.
-//
-// If all attempts fail, PublishWithRetry returns the error from the last
-// attempt.
 //
 //	policy := futureq.DefaultRetryPolicy()
 //	policy.MaxAttempts = 5
-//	err := producer.PublishWithRetry(ctx, msg, policy)
-func (p *Producer) PublishWithRetry(ctx context.Context, msg Message, policy RetryPolicy) error {
+//	err := producer.PublishBatchWithRetry(ctx, msgs, futureq.AckQuorum, policy)
+func (p *Producer) PublishBatchWithRetry(
+	ctx context.Context,
+	msgs []Message,
+	ackLevel AckLevel,
+	policy RetryPolicy,
+) error {
 	isRetryable := policy.RetryableFunc
 	if isRetryable == nil {
 		isRetryable = DefaultRetryable
@@ -90,30 +100,35 @@ func (p *Producer) PublishWithRetry(ctx context.Context, msg Message, policy Ret
 	var lastErr error
 
 	for attempt := 0; attempt < policy.MaxAttempts; attempt++ {
-		err := p.Publish(ctx, msg)
+		err := p.PublishBatch(ctx, msgs, ackLevel)
 		if err == nil {
 			return nil
 		}
-
 		lastErr = err
 		if !isRetryable(err) {
 			return err
 		}
 
 		if attempt < policy.MaxAttempts-1 {
-			// Apply jitter: actual sleep is [0.5 * backoff, 1.5 * backoff].
-			sleep := backoff
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(sleep):
+			case <-time.After(backoff):
 			}
-
-			// Grow the backoff for the next iteration, capped at MaxBackoff.
 			next := time.Duration(float64(backoff) * policy.Multiplier)
 			backoff = time.Duration(math.Min(float64(next), float64(policy.MaxBackoff)))
 		}
 	}
 
 	return lastErr
+}
+
+// PublishWithRetry is the single-message equivalent of
+// [Producer.PublishBatchWithRetry].
+func (p *Producer) PublishWithRetry(
+	ctx context.Context,
+	msg Message,
+	policy RetryPolicy,
+) error {
+	return p.PublishBatchWithRetry(ctx, []Message{msg}, AckQuorum, policy)
 }
