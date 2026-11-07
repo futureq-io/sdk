@@ -329,9 +329,32 @@ The broker assigns each delivery an opaque `deliveryTag` (the raw Pebble key). T
 
 #### Acknowledgement
 
+Manual acknowledgment is the default. The SDK sends ACK/NACK based on the handler:
+
 - Return `nil` → **ACK**. Broker deletes the message.
 - Return a non-nil `error` → **NACK**. Broker re-dispatches the message to another consumer on the next dispatcher tick.
 - Panic in the handler → recovered, the message is NACKed, and the panic is logged to stderr.
+
+To opt in to broker auto-ack for a worker connection:
+
+```go
+consumer, err := client.NewConsumer(ctx, "email", "senders",
+    futureq.WithAutoAck(true), // default: false
+)
+```
+
+Enable `delivery.subscriptions.allowAutoAck: true` on the broker first. Otherwise
+`NewConsumer` returns `PermissionDenied`. The broker must confirm acceptance in
+initial metadata; older brokers without this confirmation are rejected by the
+SDK. Reconnects request and validate the same mode. Durable subscription creation
+is unchanged, and the option also works with `WithSubscriberID`.
+
+In auto-ack mode the broker completes this recipient after each successful
+stream send. The SDK runs the handler and sends **no ACK or NACK**, including
+on errors or recovered panics. Handler failures cannot request redelivery;
+successful send does not confirm processing. Other subscriptions retain their
+independent obligations. A failed send remains pending, and a broker crash before
+completion is persisted can still cause duplicates.
 
 #### Concurrency
 
