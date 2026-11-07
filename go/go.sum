@@ -69,6 +69,8 @@ github.com/futureq-io/futureq v0.0.0 h1:Q0jIHwzrJOXt7pV8quzjkSnQAFM4oEcWOHIPWs7b
 github.com/futureq-io/futureq v0.0.0/go.mod h1:vHBDaJdkaNwyU64N0GsRR55vPXnBUEhujeLyTA9TJGU=
 github.com/futureq-io/protocol/proto/go v0.4.0 h1:xm4PsPVDe7B9K4P+1xaXfcV91YbqLX5dUbiZYsulLoI=
 github.com/futureq-io/protocol/proto/go v0.4.0/go.mod h1:VGAbKxcBAXSQIzqlrePjPXlomId4vUnVD8kgJ82xaGs=
+github.com/futureq-io/protocol/proto/go v0.4.1-0.20261107081013-2bd04c575642 h1:U8sL3pPUKhPgKB4u5vAZrClcgXnFTYwF09ypeE1+McQ=
+github.com/futureq-io/protocol/proto/go v0.4.1-0.20261107081013-2bd04c575642/go.mod h1:VGAbKxcBAXSQIzqlrePjPXlomId4vUnVD8kgJ82xaGs=
 github.com/gavv/httpexpect v2.0.0+incompatible/go.mod h1:x+9tiU1YnrOvnB725RkpoLv1M62hOWzwo5OXotisrKc=
 github.com/getsentry/sentry-go v0.27.0 h1:Pv98CIbtB3LkMWmXi4Joa5OOcwbmnX88sF5qbK3r3Ps=
 github.com/getsentry/sentry-go v0.27.0/go.mod h1:lc76E2QywIyW8WuBnwl8Lc4bkmQH4+w1gwTf25trprY=
