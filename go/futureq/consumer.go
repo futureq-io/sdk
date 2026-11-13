@@ -26,6 +26,8 @@ import (
 //
 // The handler MUST NOT block indefinitely. If it panics, the consumer
 // NACKs the message and logs the panic to stderr.
+// With [WithAutoAck], no ACK/NACK frames are sent, including on errors or panics.
+// The broker completes delivery on send, before application processing.
 type HandlerFunc func(msg Delivery) error
 
 // Consumer subscribes to a FutureQ topic and group and processes
@@ -63,6 +65,7 @@ type consumerConfig struct {
 	// run in parallel. Defaults to 1 (serial, in-order processing).
 	concurrency  int
 	subscriberID string
+	autoAck      bool
 }
 
 func defaultConsumerConfig() consumerConfig {
@@ -76,6 +79,14 @@ func defaultConsumerConfig() consumerConfig {
 // NACK back to the server. Defaults to 5 s.
 func WithAckTimeout(d time.Duration) ConsumerOption {
 	return func(c *consumerConfig) { c.ackTimeout = d }
+}
+
+// WithAutoAck opts in to broker acknowledgment after each successful send.
+// Default is false. The server must allow and confirm auto-ack subscriptions.
+// Handler errors and panics cannot request redelivery in this mode; a crash
+// before the broker persists completion may still cause duplicate deliveries.
+func WithAutoAck(enabled bool) ConsumerOption {
+	return func(c *consumerConfig) { c.autoAck = enabled }
 }
 
 // WithConcurrency sets the maximum number of handler goroutines that
@@ -168,6 +179,7 @@ func (c *Consumer) reconnect(ctx context.Context) error {
 				Topic:        c.topic,
 				GroupId:      c.group,
 				SubscriberId: c.cfg.subscriberID,
+				AutoAck:      c.cfg.autoAck,
 			},
 		},
 	}
@@ -192,6 +204,14 @@ func (c *Consumer) reconnect(ctx context.Context) error {
 		_ = stream.CloseSend()
 		_ = conn.Close()
 		return fmt.Errorf("futureq: bind subscription: %w", bindErr)
+	}
+	if c.cfg.autoAck {
+		confirmed := headers.Get("subscription-auto-ack")
+		if len(confirmed) != 1 || confirmed[0] != "true" {
+			_ = stream.CloseSend()
+			_ = conn.Close()
+			return fmt.Errorf("futureq: server did not confirm auto-ack subscription")
+		}
 	}
 
 	c.conn = conn
@@ -230,6 +250,7 @@ func (c *Consumer) closeStreamLocked() {
 //
 // A panic in handler is recovered, the message is NACKed, and the panic
 // value is printed to stderr.
+// With [WithAutoAck], errors and panics do not send ACK/NACK or request redelivery.
 //
 // Subscribe returns nil when the stream was closed cleanly. It returns
 // a non-nil error for unexpected transport failures.
@@ -245,15 +266,29 @@ func (c *Consumer) Subscribe(ctx context.Context, handler HandlerFunc) error {
 	sem := make(chan struct{}, c.cfg.concurrency)
 	ackCh := make(chan *pb.AckRequest, c.cfg.concurrency+1)
 	errCh := make(chan error, 1)
-
-	go c.ackSender(ctx, stream, ackCh, errCh)
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	ackDone := make(chan struct{})
+	if c.cfg.autoAck {
+		close(ackDone)
+	} else {
+		go func() {
+			defer close(ackDone)
+			c.ackSender(ctx, stream, ackCh, errCh)
+		}()
+	}
+	defer func() {
+		cancelWorkers()
+		// Handlers may still be running when Recv ends. Do not close their
+		// ACK channel until they have finished sending to it.
+		workers.Wait()
+		close(ackCh)
+		<-ackDone
+	}()
 
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			close(ackCh)
-			<-errCh
-
 			if err == io.EOF {
 				return nil
 			}
@@ -272,13 +307,22 @@ func (c *Consumer) Subscribe(ctx context.Context, handler HandlerFunc) error {
 			deliveryTag: msg.GetDeliveryTag(),
 		}
 
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		workers.Add(1)
 		go func(del Delivery) {
+			defer workers.Done()
 			defer func() { <-sem }()
 			ack := c.invokeHandler(handler, del)
+			if c.cfg.autoAck {
+				return
+			}
 			select {
 			case ackCh <- ack:
-			case <-ctx.Done():
+			case <-workerCtx.Done():
 			}
 		}(d)
 
