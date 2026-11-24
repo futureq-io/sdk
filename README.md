@@ -55,8 +55,8 @@ func main() {
 
     ctx := context.Background()
 
-    // Declare interest before publishing, even if no workers are connected.
-    _, err = client.Subscribe(ctx, futureq.Subscription{Topic: "email", Group: "senders"})
+    // Provision the topic and its destination before publishing.
+    _, err = client.CreateTopic(ctx, "email", futureq.InitialSubscription{Group: "senders"})
     if err != nil { log.Fatal(err) }
 
     // ── Produce ────────────────────────────────────────────────────────
@@ -193,6 +193,24 @@ When dragonboat discovery is enabled the polling loop is disabled — the observ
 
 ---
 
+### Provisioning topics
+
+`CreateTopic` declares the topic and any initial durable subscriptions in one
+request. Producers can publish as soon as a durable subscription exists, even
+while all its workers are offline. Add destinations to an existing topic with
+`client.Subscribe`.
+
+```go
+topic, err := client.CreateTopic(ctx, "email.send",
+    futureq.InitialSubscription{Group: "mailers"},
+)
+```
+
+Use `client.GetTopic(ctx, "email.send")` to check a topic's registration. Use
+`client.ListTopics(ctx, 100, "")` to fetch the first page of declared topics and
+pass `NextPageToken` to fetch the following page. These methods require a broker
+with the topic service.
+
 ### Producing
 
 #### Single message
@@ -261,9 +279,10 @@ err := producer.PublishBatchWithRetry(ctx, msgs, futureq.AckQuorum, policy)
 
 ### Durable subscriptions
 
-Declare interest separately from worker connections. Both groups and universal
-subscribers retain messages while disconnected, subject to message TTL and the
-broker's `delivery.subscriptions.disconnectTimeout` (`0s` means forever).
+Declare interest on an existing topic separately from worker connections. Both
+groups and universal subscribers retain messages while disconnected, subject to
+message TTL and the broker's `delivery.subscriptions.disconnectTimeout` (`0s`
+means forever).
 
 ```go
 // Competing workers share this subscription.
@@ -288,6 +307,8 @@ removal. Recreating the same name creates a fresh generation without old backlog
 A connection cannot create or recreate a subscription.
 
 ### Consuming
+
+This example uses the `email` topic declared in the quick start.
 
 ```go
 _, err := client.Subscribe(ctx, futureq.Subscription{Topic: "email", Group: "senders"})
@@ -409,8 +430,8 @@ fmt.Println("current leader:", client.Leader())
 ```go
 client, _ := futureq.New(seeds, …)
 
+_, _ = client.CreateTopic(ctx, "topic", futureq.InitialSubscription{Group: "group"})
 producer, _ := client.NewProducer(ctx)
-_, _ = client.Subscribe(ctx, futureq.Subscription{Topic: "topic", Group: "group"})
 consumer, _ := client.NewConsumer(ctx, "topic", "group")
 
 // On shutdown:

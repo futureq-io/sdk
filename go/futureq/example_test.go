@@ -22,7 +22,7 @@ func Example() {
 
 	ctx := context.Background()
 
-	_, err = client.Subscribe(ctx, futureq.Subscription{Topic: "email", Group: "senders"})
+	_, err = client.CreateTopic(ctx, "email", futureq.InitialSubscription{Group: "senders"})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -77,13 +77,19 @@ func ExampleProducer_PublishBatch() {
 	}
 	defer client.Close()
 
-	producer, err := client.NewProducer(context.Background())
+	ctx := context.Background()
+	_, err = client.CreateTopic(ctx, "events", futureq.InitialSubscription{Group: "workers"})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	producer, err := client.NewProducer(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer producer.Close()
 
-	err = producer.PublishBatch(context.Background(), []futureq.Message{
+	err = producer.PublishBatch(ctx, []futureq.Message{
 		{Topic: "events", Payload: []byte("a"), Delay: time.Minute},
 		{Topic: "events", Payload: []byte("b"), Delay: 2 * time.Minute, TTL: time.Hour},
 		{Topic: "events", Payload: []byte("c"), Indexes: []futureq.Index{
