@@ -28,8 +28,8 @@ func (s Subscription) request() *pb.SubscriptionRequest {
 	return &pb.SubscriptionRequest{Topic: s.Topic, GroupId: s.Group, SubscriberId: s.SubscriberID}
 }
 
-// Subscribe idempotently declares durable interest, without opening a worker
-// stream. Messages published afterward include this subscription even offline.
+// Subscribe idempotently declares durable interest on an existing topic.
+// Messages published afterward include this subscription even offline.
 func (c *Client) Subscribe(ctx context.Context, subscription Subscription) (*Subscription, error) {
 	if err := validateSubscription(subscription); err != nil {
 		return nil, err

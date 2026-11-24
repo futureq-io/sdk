@@ -41,7 +41,7 @@
 //
 // # Producing
 //
-//	_, err := client.Subscribe(ctx, futureq.Subscription{Topic: "email", Group: "workers"})
+//	_, err := client.CreateTopic(ctx, "email", futureq.InitialSubscription{Group: "workers"})
 //	if err != nil { log.Fatal(err) }
 //
 //	producer, err := client.NewProducer(ctx)
