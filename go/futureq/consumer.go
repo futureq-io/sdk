@@ -304,6 +304,7 @@ func (c *Consumer) Subscribe(ctx context.Context, handler HandlerFunc) error {
 			Payload:     msg.GetPayload(),
 			EnqueuedAt:  time.UnixMilli(msg.GetEnqueuedAtUnixMs()),
 			Delay:       time.Duration(msg.GetDelayMs()) * time.Millisecond,
+			Attempt:     msg.GetAttempt(),
 			deliveryTag: msg.GetDeliveryTag(),
 		}
 

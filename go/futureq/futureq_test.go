@@ -6,6 +6,8 @@ import (
 	"time"
 
 	pb "github.com/futureq-io/protocol/proto/go"
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestMessageToProtoRoundTrip(t *testing.T) {
@@ -113,5 +115,21 @@ func TestPublishErrorUnwrap(t *testing.T) {
 	err := &PublishError{ServerMessage: "boom"}
 	if !errors.Is(err, ErrPublishFailed) {
 		t.Fatal("PublishError should unwrap to ErrPublishFailed")
+	}
+}
+
+type RetryPublishSuite struct{ suite.Suite }
+
+func TestRetryPublishSuite(t *testing.T) {
+	suite.Run(t, new(RetryPublishSuite))
+}
+
+func (s *RetryPublishSuite) TestPreservesOptionalRetryLimit() {
+	for _, want := range []*uint32{nil, new(uint32(0)), new(uint32(3))} {
+		data, err := proto.Marshal(toProtoMessage(Message{Topic: "orders", MaxRetries: want}))
+		s.Require().NoError(err)
+		var wire pb.PublishMessage
+		s.Require().NoError(proto.Unmarshal(data, &wire))
+		s.Equal(want, wire.MaxRetries)
 	}
 }
