@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/futureq-io/futureq v0.0.0
-	github.com/futureq-io/protocol/proto/go v0.6.1-0.20261126140456-0da94f9df4b9
+	github.com/futureq-io/protocol/proto/go v0.6.1-0.20261126150253-fd334c84fde7
 	github.com/lni/dragonboat/v4 v4.0.0-20250723143628-076c7f6497dc
 	github.com/lni/vfs v0.2.1-0.20220616104132-8852fd867376
 	github.com/stretchr/testify v1.11.1

@@ -119,7 +119,7 @@ func (deadLetterTestServer) ListDeadLetters(_ context.Context, request *pb.ListD
 		return &pb.ListDeadLettersResponse{}, nil
 	}
 	return &pb.ListDeadLettersResponse{
-		Entries:       []*pb.DeadLetterSummary{{Id: []byte("id"), Topic: "orders", Attempts: 2}},
+		Entries:       []*pb.DeadLetterSummary{{Id: []byte("id"), Topic: "orders", Attempts: 2, IdentityOmitted: true}},
 		NextPageToken: []byte("cursor"),
 	}, nil
 }
@@ -187,6 +187,7 @@ func (s *DeadLetterClientSuite) TestDeadLetterRPCs() {
 	page, err := client.ListDeadLetters(ctx, "orders", 1, nil)
 	s.Require().NoError(err)
 	s.Require().Len(page.Entries, 1)
+	s.True(page.Entries[0].IdentityOmitted)
 	next, err := client.ListDeadLetters(ctx, "orders", 1, page.NextPageToken)
 	s.Require().NoError(err)
 	s.Empty(next.Entries)

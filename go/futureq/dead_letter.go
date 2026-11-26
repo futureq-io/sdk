@@ -30,6 +30,10 @@ type DeadLetterSummary struct {
 	Reason         DeadLetterReason
 	DeadLetteredAt time.Time
 	EnqueuedAt     time.Time
+
+	// IdentityOmitted indicates that list pagination omitted Group and SubscriberID.
+	// Use GetDeadLetter to retrieve the full summary.
+	IdentityOmitted bool
 }
 
 // DeadLetter includes the original publish fields alongside the failure summary.
@@ -130,6 +134,6 @@ func deadLetterSummary(summary *pb.DeadLetterSummary) DeadLetterSummary {
 		ID: summary.GetId(), Topic: summary.GetTopic(), Generation: summary.GetGeneration(),
 		Group: summary.GetGroupId(), SubscriberID: summary.GetSubscriberId(), Attempts: summary.GetAttempts(),
 		Reason: DeadLetterReason(summary.GetReason()), DeadLetteredAt: time.UnixMilli(summary.GetDeadLetteredAtUnixMs()),
-		EnqueuedAt: time.UnixMilli(summary.GetEnqueuedAtUnixMs()),
+		EnqueuedAt: time.UnixMilli(summary.GetEnqueuedAtUnixMs()), IdentityOmitted: summary.GetIdentityOmitted(),
 	}
 }
