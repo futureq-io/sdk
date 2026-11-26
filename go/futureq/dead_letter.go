@@ -3,9 +3,11 @@ package futureq
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	pb "github.com/futureq-io/protocol/proto/go"
+	"google.golang.org/protobuf/proto"
 )
 
 // DeadLetterReason describes how the final delivery attempt ended.
@@ -70,9 +72,24 @@ func (c *Client) GetDeadLetter(ctx context.Context, topic string, id []byte) (*D
 		return nil, err
 	}
 	defer conn.Close()
-	response, err := pb.NewFutureQDeadLetterClient(conn).GetDeadLetter(ctx, &pb.DeadLetterRequest{Topic: topic, Id: id})
+	stream, err := pb.NewFutureQDeadLetterClient(conn).GetDeadLetter(ctx, &pb.DeadLetterRequest{Topic: topic, Id: id})
 	if err != nil {
 		return nil, fmt.Errorf("futureq: get dead letter: %w", err)
+	}
+	var data []byte
+	for {
+		chunk, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("futureq: get dead letter: %w", err)
+		}
+		data = append(data, chunk.GetData()...)
+	}
+	var response pb.DeadLetter
+	if err := proto.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("futureq: decode dead letter: %w", err)
 	}
 	wire := response.GetMessage()
 	if wire == nil || response.GetSummary() == nil {

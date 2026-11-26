@@ -124,11 +124,11 @@ func (deadLetterTestServer) ListDeadLetters(_ context.Context, request *pb.ListD
 	}, nil
 }
 
-func (deadLetterTestServer) GetDeadLetter(_ context.Context, request *pb.DeadLetterRequest) (*pb.DeadLetter, error) {
+func (deadLetterTestServer) GetDeadLetter(request *pb.DeadLetterRequest, stream grpc.ServerStreamingServer[pb.DeadLetterChunk]) error {
 	if request.Topic != "orders" || string(request.Id) != "id" {
-		return nil, status.Error(codes.NotFound, "unknown record")
+		return status.Error(codes.NotFound, "unknown record")
 	}
-	return &pb.DeadLetter{
+	data, err := proto.Marshal(&pb.DeadLetter{
 		Summary: &pb.DeadLetterSummary{
 			Id: request.Id, Topic: request.Topic, GroupId: "workers", Attempts: 2,
 			Reason: pb.DeadLetterReason_DEAD_LETTER_REASON_NACK, EnqueuedAtUnixMs: 10, DeadLetteredAtUnixMs: 20,
@@ -137,7 +137,18 @@ func (deadLetterTestServer) GetDeadLetter(_ context.Context, request *pb.DeadLet
 			Topic: request.Topic, Payload: []byte("original"), TtlMs: 80, MaxRetries: new(uint32(1)),
 			Indexes: []*pb.Index{{Value: &pb.Index_StringValue{StringValue: "test"}}},
 		},
-	}, nil
+	})
+	if err != nil {
+		return err
+	}
+	for len(data) > 0 {
+		n := min(3, len(data))
+		if err := stream.Send(&pb.DeadLetterChunk{Data: data[:n]}); err != nil {
+			return err
+		}
+		data = data[n:]
+	}
+	return nil
 }
 
 func (deadLetterTestServer) DeleteDeadLetter(_ context.Context, request *pb.DeadLetterRequest) (*pb.DeleteDeadLetterResponse, error) {
