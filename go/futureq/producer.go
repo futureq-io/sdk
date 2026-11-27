@@ -235,8 +235,9 @@ func toProtoAckLevel(a AckLevel) pb.AckLevel {
 // toProtoMessage converts an SDK [Message] into the wire [pb.PublishMessage].
 func toProtoMessage(m Message) *pb.PublishMessage {
 	pm := &pb.PublishMessage{
-		Topic:   m.Topic,
-		Payload: m.Payload,
+		Topic:      m.Topic,
+		Payload:    m.Payload,
+		MaxRetries: m.MaxRetries,
 	}
 	if m.Delay > 0 {
 		pm.DelayMs = m.Delay.Milliseconds()

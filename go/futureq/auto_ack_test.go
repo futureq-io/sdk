@@ -1,6 +1,7 @@
 package futureq
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,12 +11,14 @@ import (
 	"time"
 
 	pb "github.com/futureq-io/protocol/proto/go"
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 )
 
 type autoAckClientStream struct {
@@ -188,4 +191,84 @@ func TestAutoAckHandshake(t *testing.T) {
 			}
 		})
 	}
+}
+
+type ChunkedDeliverySuite struct{ suite.Suite }
+
+func TestChunkedDeliverySuite(t *testing.T) {
+	suite.Run(t, new(ChunkedDeliverySuite))
+}
+
+type chunkTestStream struct {
+	grpc.ClientStream
+	responses []*pb.QueueMessage
+	ended     chan struct{}
+	acked     chan *pb.AckRequest
+}
+
+func (s *chunkTestStream) Recv() (*pb.QueueMessage, error) {
+	if len(s.responses) == 0 {
+		<-s.ended
+		return nil, io.EOF
+	}
+	message := s.responses[0]
+	s.responses = s.responses[1:]
+	return message, nil
+}
+
+func (s *chunkTestStream) Send(frame *pb.ConsumerFrame) error {
+	s.acked <- frame.GetAck()
+	return nil
+}
+
+func (s *ChunkedDeliverySuite) TestSubscribeDeliversAndAcknowledgesTheWholeMessageOnce() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	want := &pb.QueueMessage{
+		Topic: "orders", Payload: bytes.Repeat([]byte("futureq"), 800),
+		DeliveryTag: []byte("opaque-tag"), Attempt: 2,
+	}
+	data, err := proto.Marshal(want)
+	s.Require().NoError(err)
+	stream := &chunkTestStream{ended: make(chan struct{}), acked: make(chan *pb.AckRequest, 1)}
+	for len(data) > 0 {
+		size := min(350, len(data))
+		stream.responses = append(stream.responses, &pb.QueueMessage{ChunkData: data[:size], MoreChunks: size < len(data)})
+		data = data[size:]
+	}
+	handled := make(chan Delivery, 1)
+	consumer := &Consumer{cfg: defaultConsumerConfig(), stream: stream}
+	done := make(chan error, 1)
+	go func() {
+		done <- consumer.Subscribe(ctx, func(message Delivery) error {
+			handled <- message
+			return nil
+		})
+	}()
+	defer func() { close(stream.ended); <-done }()
+	select {
+	case ack := <-stream.acked:
+		s.Require().NotNil(ack)
+		s.True(ack.GetSuccess())
+		s.Equal(want.GetDeliveryTag(), ack.GetDeliveryTag())
+	case <-ctx.Done():
+		s.FailNow("the complete delivery was not acknowledged")
+	}
+	message := <-handled
+	s.Equal(want.GetPayload(), message.Payload)
+	s.Equal(want.GetAttempt(), message.Attempt)
+	s.Equal(want.GetTopic(), message.Topic)
+}
+
+func (s *ChunkedDeliverySuite) TestIncompleteFrameIsDiscarded() {
+	first := true
+	message, err := recvDeliveryMessage(func() (*pb.QueueMessage, error) {
+		if first {
+			first = false
+			return &pb.QueueMessage{ChunkData: []byte("partial"), MoreChunks: true}, nil
+		}
+		return nil, io.EOF
+	})
+	s.ErrorIs(err, io.ErrUnexpectedEOF)
+	s.Nil(message)
 }

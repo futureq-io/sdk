@@ -86,6 +86,10 @@ type Message struct {
 	// Indexes are the secondary indexes attached to the message.
 	// Indexes are expensive in FutureQ — see [Index].
 	Indexes []Index
+
+	// MaxRetries limits redeliveries per durable subscription. Nil permits
+	// unlimited retries. An explicit zero permits one delivery attempt.
+	MaxRetries *uint32
 }
 
 // Delivery is received by the handler function passed to [Consumer.Subscribe].
@@ -105,8 +109,10 @@ type Delivery struct {
 	// Delay is the original delay requested by the producer.
 	Delay time.Duration
 
-	// deliveryTag is the opaque server-assigned token (the raw Pebble key)
-	// that uniquely identifies this delivery. The SDK echoes it back in the
+	// Attempt is one-based when the publisher set MaxRetries.
+	Attempt uint64
+
+	// deliveryTag is the opaque server-assigned token for this delivery. The SDK echoes it back in the
 	// ACK/NACK frame; callers should never need to touch it directly.
 	deliveryTag []byte
 }

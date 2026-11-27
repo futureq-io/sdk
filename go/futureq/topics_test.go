@@ -8,6 +8,7 @@ import (
 	"time"
 
 	pb "github.com/futureq-io/protocol/proto/go"
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -104,4 +105,102 @@ func TestTopicAPIs(t *testing.T) {
 	if _, err := client.CreateTopic(ctx, "closed"); !errors.Is(err, ErrClosed) {
 		t.Fatalf("create after close: got %v", err)
 	}
+}
+
+type deadLetterTestServer struct {
+	pb.UnimplementedFutureQDeadLetterServer
+}
+
+func (deadLetterTestServer) ListDeadLetters(_ context.Context, request *pb.ListDeadLettersRequest) (*pb.ListDeadLettersResponse, error) {
+	if request.Topic != "orders" || request.PageSize != 1 {
+		return nil, status.Error(codes.InvalidArgument, "unexpected list request")
+	}
+	if string(request.PageToken) == "cursor" {
+		return &pb.ListDeadLettersResponse{}, nil
+	}
+	return &pb.ListDeadLettersResponse{
+		Entries:       []*pb.DeadLetterSummary{{Id: []byte("id"), Topic: "orders", Attempts: 2, IdentityOmitted: true}},
+		NextPageToken: []byte("cursor"),
+	}, nil
+}
+
+func (deadLetterTestServer) GetDeadLetter(request *pb.DeadLetterRequest, stream grpc.ServerStreamingServer[pb.DeadLetterChunk]) error {
+	if request.Topic != "orders" || string(request.Id) != "id" {
+		return status.Error(codes.NotFound, "unknown record")
+	}
+	data, err := proto.Marshal(&pb.DeadLetter{
+		Summary: &pb.DeadLetterSummary{
+			Id: request.Id, Topic: request.Topic, GroupId: "workers", Attempts: 2,
+			Reason: pb.DeadLetterReason_DEAD_LETTER_REASON_NACK, EnqueuedAtUnixMs: 10, DeadLetteredAtUnixMs: 20,
+		},
+		Message: &pb.PublishMessage{
+			Topic: request.Topic, Payload: []byte("original"), TtlMs: 80, MaxRetries: new(uint32(1)),
+			Indexes: []*pb.Index{{Value: &pb.Index_StringValue{StringValue: "test"}}},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	for len(data) > 0 {
+		n := min(3, len(data))
+		if err := stream.Send(&pb.DeadLetterChunk{Data: data[:n]}); err != nil {
+			return err
+		}
+		data = data[n:]
+	}
+	return nil
+}
+
+func (deadLetterTestServer) DeleteDeadLetter(_ context.Context, request *pb.DeadLetterRequest) (*pb.DeleteDeadLetterResponse, error) {
+	if request.Topic != "orders" || string(request.Id) != "id" {
+		return nil, status.Error(codes.InvalidArgument, "unexpected delete request")
+	}
+	return &pb.DeleteDeadLetterResponse{}, nil
+}
+
+type DeadLetterClientSuite struct{ suite.Suite }
+
+func TestDeadLetterClientSuite(t *testing.T) {
+	suite.Run(t, new(DeadLetterClientSuite))
+}
+
+func (s *DeadLetterClientSuite) TestDeadLetterRPCs() {
+	listener := bufconn.Listen(1 << 20)
+	defer listener.Close()
+	server := grpc.NewServer()
+	pb.RegisterFutureQDeadLetterServer(server, deadLetterTestServer{})
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	tracker := newTopologyTracker(nil, time.Hour, func(_ context.Context, address string) (*grpc.ClientConn, error) {
+		if address != "leader" {
+			return nil, errors.New("dead letter requests require the leader")
+		}
+		return grpc.NewClient("passthrough:///deadletters",
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) }),
+			grpc.WithTransportCredentials(insecure.NewCredentials()))
+	})
+	tracker.setLeader(1, "leader", Topology{})
+	client := &Client{tracker: tracker}
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	page, err := client.ListDeadLetters(ctx, "orders", 1, nil)
+	s.Require().NoError(err)
+	s.Require().Len(page.Entries, 1)
+	s.True(page.Entries[0].IdentityOmitted)
+	next, err := client.ListDeadLetters(ctx, "orders", 1, page.NextPageToken)
+	s.Require().NoError(err)
+	s.Empty(next.Entries)
+	entry, err := client.GetDeadLetter(ctx, "orders", page.Entries[0].ID)
+	s.Require().NoError(err)
+	s.Equal(DeadLetterReasonNack, entry.Summary.Reason)
+	s.Equal(time.UnixMilli(20), entry.Summary.DeadLetteredAt)
+	s.Equal("workers", entry.Summary.Group)
+	s.Equal(Message{
+		Topic: "orders", Payload: []byte("original"), TTL: 80 * time.Millisecond,
+		Indexes: []Index{StringIndex("test")}, MaxRetries: new(uint32(1)),
+	}, entry.Message)
+	s.NoError(client.DeleteDeadLetter(ctx, "orders", entry.Summary.ID))
+	_, err = client.GetDeadLetter(ctx, "orders", []byte("missing"))
+	s.Equal(codes.NotFound, status.Code(err))
 }

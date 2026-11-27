@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/futureq-io/protocol/proto/go"
 )
@@ -287,7 +288,7 @@ func (c *Consumer) Subscribe(ctx context.Context, handler HandlerFunc) error {
 	}()
 
 	for {
-		msg, err := stream.Recv()
+		msg, err := recvDeliveryMessage(stream.Recv)
 		if err != nil {
 			if err == io.EOF {
 				return nil
@@ -304,6 +305,7 @@ func (c *Consumer) Subscribe(ctx context.Context, handler HandlerFunc) error {
 			Payload:     msg.GetPayload(),
 			EnqueuedAt:  time.UnixMilli(msg.GetEnqueuedAtUnixMs()),
 			Delay:       time.Duration(msg.GetDelayMs()) * time.Millisecond,
+			Attempt:     msg.GetAttempt(),
 			deliveryTag: msg.GetDeliveryTag(),
 		}
 
@@ -334,6 +336,43 @@ func (c *Consumer) Subscribe(ctx context.Context, handler HandlerFunc) error {
 		default:
 		}
 	}
+}
+
+// recvDeliveryMessage reassembles a large delivery before the application can
+// see it or acknowledge its token. An interrupted sequence is discarded.
+func recvDeliveryMessage(recv func() (*pb.QueueMessage, error)) (*pb.QueueMessage, error) {
+	frame, err := recv()
+	if err != nil {
+		return nil, err
+	}
+	data := frame.GetChunkData()
+	if len(data) == 0 {
+		if frame.GetMoreChunks() {
+			return nil, fmt.Errorf("empty delivery chunk")
+		}
+		return frame, nil
+	}
+	for frame.GetMoreChunks() {
+		frame, err = recv()
+		if err == io.EOF {
+			return nil, io.ErrUnexpectedEOF
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(frame.GetChunkData()) == 0 {
+			return nil, fmt.Errorf("incomplete chunked delivery")
+		}
+		data = append(data, frame.GetChunkData()...)
+	}
+	message := new(pb.QueueMessage)
+	if err := proto.Unmarshal(data, message); err != nil {
+		return nil, fmt.Errorf("decode chunked delivery: %w", err)
+	}
+	if len(message.GetDeliveryTag()) == 0 || len(message.GetChunkData()) != 0 || message.GetMoreChunks() {
+		return nil, fmt.Errorf("invalid chunked delivery")
+	}
+	return message, nil
 }
 
 // ackSender owns all writes to the stream after the initial
